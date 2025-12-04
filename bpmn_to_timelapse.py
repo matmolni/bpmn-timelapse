@@ -3,6 +3,7 @@ import argparse
 import subprocess
 import tempfile
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -66,15 +67,54 @@ def checkout_file_version(repo_path, commit_hash, file_path, output_path):
         f.write(result.stdout)
 
 
-def convert_bpmn_to_svg(bpmn_path, output_path):
-    """Convert a single BPMN file to SVG using bpmn-to-image."""
-    try:
-        cmd = ['bpmn-to-image', '--no-footer', bpmn_path + ':' + output_path]
-        subprocess.run(cmd, check=True, capture_output=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Error converting {bpmn_path}: {e}")
-        return False
+def batch_convert_bpmn_to_svg(bpmn_svg_pairs, batch_size=50):
+    """
+    Convert multiple BPMN files to SVG using batched bpmn-to-image calls.
+    
+    Processes files in batches to balance performance (fewer browser launches)
+    with safety (memory limits, command line length, failure recovery).
+    
+    Args:
+        bpmn_svg_pairs: List of (bpmn_path, svg_path) tuples
+        batch_size: Number of files per batch (default 50)
+    
+    Returns:
+        Number of successfully converted files
+    """
+    if not bpmn_svg_pairs:
+        return 0
+    
+    total = len(bpmn_svg_pairs)
+    success_count = 0
+    
+    # Process in batches
+    for batch_start in range(0, total, batch_size):
+        batch_end = min(batch_start + batch_size, total)
+        batch = bpmn_svg_pairs[batch_start:batch_end]
+        batch_num = (batch_start // batch_size) + 1
+        total_batches = (total + batch_size - 1) // batch_size
+        
+        batch_start_time = time.time()
+        
+        # Build command with all file pairs in this batch
+        cmd = ['bpmn-to-image', '--no-footer']
+        for bpmn_path, svg_path in batch:
+            cmd.append(f'{bpmn_path}:{svg_path}')
+        
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            success_count += len(batch)
+            elapsed = time.time() - batch_start_time
+            print(f"  Batch {batch_num}/{total_batches}: converted {len(batch)} files in {elapsed:.1f}s")
+        except subprocess.CalledProcessError as e:
+            elapsed = time.time() - batch_start_time
+            print(f"  Error in batch {batch_num} after {elapsed:.1f}s: {e}")
+            # Count which files in this batch succeeded
+            batch_success = sum(1 for _, svg_path in batch if os.path.exists(svg_path))
+            success_count += batch_success
+            print(f"  Partial success: {batch_success}/{len(batch)} files in batch")
+    
+    return success_count
 
 
 def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, background='white'):
@@ -159,9 +199,14 @@ def create_timelapse_video(image_dir, output_video, fps=2):
 
 
 def generate_images(repo_path, filename, output_dir, since=None, until=None, 
-                    canvas_width=1920, canvas_height=1080):
+                    canvas_width=1920, canvas_height=1080, batch_size=50):
     """
-    Step 1: Generate images from git history of a BPMN file.
+    Generate images from git history of a BPMN file.
+    
+    Uses a three-phase approach for performance:
+    1. Extract all BPMN versions from git history
+    2. Batch convert BPMNs to SVGs (minimizes browser launches)
+    3. Convert SVGs to PNGs at fixed canvas size
     
     Args:
         repo_path: Path to the git repository root
@@ -171,14 +216,17 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
         until: Optional end date (YYYY-MM-DD)
         canvas_width: Fixed canvas width for output images
         canvas_height: Fixed canvas height for output images
+        batch_size: Number of files per BPMN->SVG batch (default 50)
     """
     repo_path = os.path.abspath(repo_path)
     output_dir = os.path.abspath(output_dir)
     svg_dir = os.path.join(output_dir, 'svg')
+    bpmn_dir = os.path.join(output_dir, 'bpmn')
     
     # Create output directories
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(svg_dir, exist_ok=True)
+    os.makedirs(bpmn_dir, exist_ok=True)
     print(f"Images will be saved to: {output_dir}")
     print(f"Canvas size: {canvas_width}x{canvas_height}")
     
@@ -192,37 +240,70 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     
     print(f"Found {len(commits)} commits")
     
-    # Process each commit
+    total_start_time = time.time()
+    
+    # Phase 1: Extract all BPMN versions from git
+    phase1_start = time.time()
+    print(f"\n[Phase 1/3] Extracting BPMN files from git history...")
+    bpmn_svg_pairs = []
+    frame_mapping = []  # Track (frame_num, bpmn_path, svg_path) for phase 3
+    
     for i, (commit_hash, timestamp, message) in enumerate(commits, 1):
         date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
-        print(f"[{i}/{len(commits)}] {date_str} - {commit_hash[:8]} - {message[:50]}")
         
         # Find the file path at this commit
         file_path = get_file_path_at_commit(repo_path, commit_hash, filename)
         if not file_path:
-            print(f"  File not found at commit {commit_hash[:8]}, skipping")
+            print(f"  [{i}/{len(commits)}] {commit_hash[:8]} - File not found, skipping")
             continue
         
-        # Checkout the file to a temp location
-        temp_bpmn = os.path.join(output_dir, f'temp_{i:04d}.bpmn')
-        checkout_file_version(repo_path, commit_hash, file_path, temp_bpmn)
-        
-        # Convert BPMN to SVG
+        # Extract BPMN to temp location
+        bpmn_path = os.path.join(bpmn_dir, f'frame_{i:04d}.bpmn')
         svg_path = os.path.join(svg_dir, f'frame_{i:04d}.svg')
-        if not convert_bpmn_to_svg(temp_bpmn, svg_path):
-            os.remove(temp_bpmn)
+        
+        checkout_file_version(repo_path, commit_hash, file_path, bpmn_path)
+        bpmn_svg_pairs.append((bpmn_path, svg_path))
+        frame_mapping.append((i, bpmn_path, svg_path))
+        
+        if i % 100 == 0 or i == len(commits):
+            print(f"  Extracted {i}/{len(commits)} files...")
+    
+    phase1_elapsed = time.time() - phase1_start
+    print(f"  Extracted {len(bpmn_svg_pairs)} BPMN files in {phase1_elapsed:.1f}s")
+    
+    # Phase 2: Batch convert BPMN to SVG
+    phase2_start = time.time()
+    print(f"\n[Phase 2/3] Converting BPMN to SVG (batch size: {batch_size})...")
+    svg_count = batch_convert_bpmn_to_svg(bpmn_svg_pairs, batch_size=batch_size)
+    phase2_elapsed = time.time() - phase2_start
+    print(f"  Converted {svg_count}/{len(bpmn_svg_pairs)} files to SVG in {phase2_elapsed:.1f}s")
+    
+    # Phase 3: Convert SVGs to PNGs at fixed canvas size
+    phase3_start = time.time()
+    print(f"\n[Phase 3/3] Converting SVGs to PNG ({canvas_width}x{canvas_height})...")
+    png_count = 0
+    for i, (frame_num, bpmn_path, svg_path) in enumerate(frame_mapping, 1):
+        if not os.path.exists(svg_path):
             continue
         
-        # Convert SVG to PNG at fixed canvas size
-        output_image = os.path.join(output_dir, f'frame_{i:04d}.png')
+        output_image = os.path.join(output_dir, f'frame_{frame_num:04d}.png')
         if svg_to_png(svg_path, output_image, canvas_width, canvas_height):
-            print(f"  Converted to {output_image}")
+            png_count += 1
         
-        # Clean up temp bpmn file
-        os.remove(temp_bpmn)
+        if i % 50 == 0 or i == len(frame_mapping):
+            elapsed = time.time() - phase3_start
+            print(f"  Converted {i}/{len(frame_mapping)} to PNG... ({elapsed:.1f}s)")
     
-    print(f"\nDone! {len(commits)} images saved to: {output_dir}")
+    phase3_elapsed = time.time() - phase3_start
+    
+    # Clean up BPMN files (keep SVGs for reference)
+    print(f"\nCleaning up temporary BPMN files...")
+    shutil.rmtree(bpmn_dir)
+    
+    total_elapsed = time.time() - total_start_time
+    print(f"\nDone! {png_count} images saved to: {output_dir}")
     print(f"SVGs preserved in: {svg_dir}")
+    print(f"Total time: {total_elapsed:.1f}s (Phase 1: {phase1_elapsed:.1f}s, Phase 2: {phase2_elapsed:.1f}s, Phase 3: {phase3_elapsed:.1f}s)")
     print("Review the images, then run 'video' command to generate the timelapse.")
 
 
@@ -245,6 +326,8 @@ def main():
                             help='Canvas width in pixels (default: 1920)')
     gen_parser.add_argument('--height', type=int, default=1080,
                             help='Canvas height in pixels (default: 1080)')
+    gen_parser.add_argument('--batch-size', type=int, default=50,
+                            help='Files per BPMN->SVG batch (default: 50)')
     
     # Step 2: Create video
     video_parser = subparsers.add_parser('video', help='Create video from generated images')
@@ -264,7 +347,8 @@ def main():
             since=args.since,
             until=args.until,
             canvas_width=args.width,
-            canvas_height=args.height
+            canvas_height=args.height,
+            batch_size=args.batch_size
         )
     elif args.command == 'video':
         create_timelapse_video(
