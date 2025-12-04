@@ -27,21 +27,23 @@ def get_commits_for_file(repo_path, filename, since=None, until=None):
     """
     Get all commits on main branch that modified the specified file.
     Uses the exact file path with --follow to properly track renames.
-    Returns list of (commit_hash, timestamp, commit_message) tuples, oldest first.
+    Returns list of (commit_hash, timestamp, message, file_path) tuples, oldest first.
+    The file_path is the actual path of the file at that commit (handles renames).
     """
     # First, find the current path of the file
-    file_path = find_file_in_repo(repo_path, filename)
-    if not file_path:
+    current_path = find_file_in_repo(repo_path, filename)
+    if not current_path:
         print(f"Error: File '{filename}' not found in repository")
         return []
     
-    print(f"Tracking file: {file_path}")
+    print(f"Tracking file: {current_path}")
     
+    # Use --name-only to get the file path at each commit (tracks renames)
     cmd = [
         'git', '-C', repo_path,
-        'log', '--follow', '--format=%H %at %s',
+        'log', '--follow', '--format=%H %at %s', '--name-only',
         '--first-parent', 'main',
-        '--', file_path  # Use exact path for proper --follow tracking
+        '--', current_path
     ]
     
     if since:
@@ -52,14 +54,32 @@ def get_commits_for_file(repo_path, filename, since=None, until=None):
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     
     commits = []
-    for line in result.stdout.strip().split('\n'):
-        if line:
-            parts = line.split(' ', 2)
-            if len(parts) >= 2:
-                commit_hash = parts[0]
-                timestamp = int(parts[1])
-                message = parts[2] if len(parts) > 2 else ''
-                commits.append((commit_hash, timestamp, message))
+    lines = result.stdout.strip().split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line:
+            i += 1
+            continue
+        
+        # Parse commit info line: "hash timestamp message"
+        parts = line.split(' ', 2)
+        if len(parts) >= 2 and len(parts[0]) == 40:  # Full commit hash
+            commit_hash = parts[0]
+            timestamp = int(parts[1])
+            message = parts[2] if len(parts) > 2 else ''
+            
+            # Next non-empty line should be the file path
+            i += 1
+            while i < len(lines) and not lines[i]:
+                i += 1
+            
+            if i < len(lines) and lines[i] and not lines[i].startswith(' '):
+                file_path = lines[i]
+                commits.append((commit_hash, timestamp, message, file_path))
+            i += 1
+        else:
+            i += 1
     
     # Return in chronological order (oldest first)
     return list(reversed(commits))
@@ -252,6 +272,10 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     svg_dir = os.path.join(output_dir, 'svg')
     bpmn_dir = os.path.join(output_dir, 'bpmn')
     
+    # Clean up any existing output directory
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    
     # Create output directories
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(svg_dir, exist_ok=True)
@@ -277,15 +301,7 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     bpmn_svg_pairs = []
     frame_mapping = []  # Track (frame_num, bpmn_path, svg_path) for phase 3
     
-    for i, (commit_hash, timestamp, message) in enumerate(commits, 1):
-        date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
-        
-        # Find the file path at this commit
-        file_path = get_file_path_at_commit(repo_path, commit_hash, filename)
-        if not file_path:
-            print(f"  [{i}/{len(commits)}] {commit_hash[:8]} - File not found, skipping")
-            continue
-        
+    for i, (commit_hash, timestamp, message, file_path) in enumerate(commits, 1):
         # Extract BPMN to temp location
         bpmn_path = os.path.join(bpmn_dir, f'frame_{i:04d}.bpmn')
         svg_path = os.path.join(svg_dir, f'frame_{i:04d}.svg')
