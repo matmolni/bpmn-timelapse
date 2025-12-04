@@ -8,16 +8,40 @@ from datetime import datetime
 from pathlib import Path
 
 
+def find_file_in_repo(repo_path, filename):
+    """Find the current path of a file in the repository."""
+    cmd = ['git', '-C', repo_path, 'ls-files', f'**/{filename}']
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    paths = result.stdout.strip().split('\n')
+    paths = [p for p in paths if p]  # Filter empty strings
+    
+    if not paths:
+        return None
+    if len(paths) > 1:
+        print(f"Warning: Multiple files match '{filename}': {paths}")
+        print(f"Using: {paths[0]}")
+    return paths[0]
+
+
 def get_commits_for_file(repo_path, filename, since=None, until=None):
     """
     Get all commits on main branch that modified the specified file.
+    Uses the exact file path with --follow to properly track renames.
     Returns list of (commit_hash, timestamp, commit_message) tuples, oldest first.
     """
+    # First, find the current path of the file
+    file_path = find_file_in_repo(repo_path, filename)
+    if not file_path:
+        print(f"Error: File '{filename}' not found in repository")
+        return []
+    
+    print(f"Tracking file: {file_path}")
+    
     cmd = [
         'git', '-C', repo_path,
         'log', '--follow', '--format=%H %at %s',
-        '--first-parent', 'main',  # Only main branch
-        '--', f'**/{filename}'  # Match file anywhere in repo
+        '--first-parent', 'main',
+        '--', file_path  # Use exact path for proper --follow tracking
     ]
     
     if since:
@@ -314,6 +338,9 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     print("Review the images, then run 'video' command to generate the timelapse.")
 
 
+DEFAULT_FRAME_DIR = './timelapse_frames'
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate a timelapse video from git history of a BPMN file'
@@ -325,24 +352,16 @@ def main():
     gen_parser = subparsers.add_parser('generate', help='Generate images from git history')
     gen_parser.add_argument('filename', help='Name of the BPMN file to track')
     gen_parser.add_argument('repo_path', help='Path to the git repository root')
-    gen_parser.add_argument('-o', '--output-dir', default='./timelapse_frames',
-                            help='Output directory for images (default: ./timelapse_frames)')
     gen_parser.add_argument('--since', help='Start date (YYYY-MM-DD)')
     gen_parser.add_argument('--until', help='End date (YYYY-MM-DD)')
-    gen_parser.add_argument('--width', type=int, default=1920,
-                            help='Canvas width in pixels (default: 1920)')
-    gen_parser.add_argument('--height', type=int, default=1080,
-                            help='Canvas height in pixels (default: 1080)')
-    gen_parser.add_argument('--batch-size', type=int, default=50,
-                            help='Files per BPMN->SVG batch (default: 50)')
+    gen_parser.add_argument('--width', type=int, default=1920, help='Canvas width (default: 1920)')
+    gen_parser.add_argument('--height', type=int, default=1080, help='Canvas height (default: 1080)')
+    gen_parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
     
     # Step 2: Create video
     video_parser = subparsers.add_parser('video', help='Create video from generated images')
-    video_parser.add_argument('image_dir', help='Directory containing the generated images')
-    video_parser.add_argument('-o', '--output', default='timelapse.mp4',
-                              help='Output video file path (default: timelapse.mp4)')
-    video_parser.add_argument('--fps', type=int, default=2,
-                              help='Frames per second (default: 2)')
+    video_parser.add_argument('-o', '--output', default='timelapse.mp4', help='Output file (default: timelapse.mp4)')
+    video_parser.add_argument('--fps', type=int, default=5, help='Frames per second (default: 5)')
     
     args = parser.parse_args()
     
@@ -350,7 +369,7 @@ def main():
         generate_images(
             repo_path=args.repo_path,
             filename=args.filename,
-            output_dir=args.output_dir,
+            output_dir=DEFAULT_FRAME_DIR,
             since=args.since,
             until=args.until,
             canvas_width=args.width,
@@ -359,7 +378,7 @@ def main():
         )
     elif args.command == 'video':
         create_timelapse_video(
-            image_dir=args.image_dir,
+            image_dir=DEFAULT_FRAME_DIR,
             output_video=args.output,
             fps=args.fps
         )
