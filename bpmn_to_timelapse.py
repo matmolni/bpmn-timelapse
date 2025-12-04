@@ -66,20 +66,63 @@ def checkout_file_version(repo_path, commit_hash, file_path, output_path):
         f.write(result.stdout)
 
 
-def convert_bpmn_to_image(bpmn_path, output_path, scale=0.5):
-    """Convert a single BPMN file to PNG using bpmn-to-image.
-    
-    Args:
-        bpmn_path: Path to the BPMN file
-        output_path: Path for the output image
-        scale: Scale factor (default 0.5 = half size, reduces 32k to 16k)
-    """
+def convert_bpmn_to_svg(bpmn_path, output_path):
+    """Convert a single BPMN file to SVG using bpmn-to-image."""
     try:
-        cmd = ['bpmn-to-image', f'--scale={scale}', bpmn_path + ':' + output_path]
+        cmd = ['bpmn-to-image', '--no-footer', bpmn_path + ':' + output_path]
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error converting {bpmn_path}: {e}")
+        return False
+
+
+def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, background='white'):
+    """
+    Convert SVG to PNG at a fixed canvas size, centering the diagram.
+    Uses a two-step process: rsvg-convert for SVG rendering, then ffmpeg to pad/center.
+    
+    Args:
+        svg_path: Path to the SVG file
+        output_path: Path for the output PNG
+        canvas_width: Fixed canvas width (default 1920 for 1080p)
+        canvas_height: Fixed canvas height (default 1080 for 1080p)
+        background: Background color (default white)
+    """
+    try:
+        # Step 1: Render SVG to PNG, fitting within canvas while keeping aspect ratio
+        temp_png = output_path + '.temp.png'
+        cmd_rsvg = [
+            'rsvg-convert',
+            '-w', str(canvas_width),
+            '-h', str(canvas_height),
+            '--keep-aspect-ratio',
+            '--background-color', background,
+            '-o', temp_png,
+            svg_path
+        ]
+        subprocess.run(cmd_rsvg, check=True, capture_output=True)
+        
+        # Step 2: Use ffmpeg to pad the image to exact canvas size, centering it
+        cmd_ffmpeg = [
+            'ffmpeg', '-y',
+            '-i', temp_png,
+            '-vf', f'pad={canvas_width}:{canvas_height}:(ow-iw)/2:(oh-ih)/2:white',
+            output_path
+        ]
+        subprocess.run(cmd_ffmpeg, check=True, capture_output=True)
+        
+        # Clean up temp file
+        os.remove(temp_png)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error converting SVG {svg_path}: {e}")
+        # Clean up temp file if it exists
+        if os.path.exists(output_path + '.temp.png'):
+            os.remove(output_path + '.temp.png')
+        return False
+    except FileNotFoundError as e:
+        print(f"Error: Required tool not found. Install with: brew install librsvg ffmpeg")
         return False
 
 
@@ -115,7 +158,8 @@ def create_timelapse_video(image_dir, output_video, fps=2):
         return False
 
 
-def generate_images(repo_path, filename, output_dir, since=None, until=None, scale=0.5):
+def generate_images(repo_path, filename, output_dir, since=None, until=None, 
+                    canvas_width=1920, canvas_height=1080):
     """
     Step 1: Generate images from git history of a BPMN file.
     
@@ -125,14 +169,18 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None, sca
         output_dir: Directory to save the generated images
         since: Optional start date (YYYY-MM-DD)
         until: Optional end date (YYYY-MM-DD)
-        scale: Scale factor for images (default 0.5)
+        canvas_width: Fixed canvas width for output images
+        canvas_height: Fixed canvas height for output images
     """
     repo_path = os.path.abspath(repo_path)
     output_dir = os.path.abspath(output_dir)
+    svg_dir = os.path.join(output_dir, 'svg')
     
-    # Create output directory
+    # Create output directories
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(svg_dir, exist_ok=True)
     print(f"Images will be saved to: {output_dir}")
+    print(f"Canvas size: {canvas_width}x{canvas_height}")
     
     # Get all commits that modified the file
     print(f"Finding commits for {filename}...")
@@ -159,16 +207,23 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None, sca
         temp_bpmn = os.path.join(output_dir, f'temp_{i:04d}.bpmn')
         checkout_file_version(repo_path, commit_hash, file_path, temp_bpmn)
         
-        # Convert to image
+        # Convert BPMN to SVG
+        svg_path = os.path.join(svg_dir, f'frame_{i:04d}.svg')
+        if not convert_bpmn_to_svg(temp_bpmn, svg_path):
+            os.remove(temp_bpmn)
+            continue
+        
+        # Convert SVG to PNG at fixed canvas size
         output_image = os.path.join(output_dir, f'frame_{i:04d}.png')
-        if convert_bpmn_to_image(temp_bpmn, output_image, scale=scale):
+        if svg_to_png(svg_path, output_image, canvas_width, canvas_height):
             print(f"  Converted to {output_image}")
         
         # Clean up temp bpmn file
         os.remove(temp_bpmn)
     
     print(f"\nDone! {len(commits)} images saved to: {output_dir}")
-    print("Review the images, then run with --create-video to generate the timelapse.")
+    print(f"SVGs preserved in: {svg_dir}")
+    print("Review the images, then run 'video' command to generate the timelapse.")
 
 
 def main():
@@ -186,8 +241,10 @@ def main():
                             help='Output directory for images (default: ./timelapse_frames)')
     gen_parser.add_argument('--since', help='Start date (YYYY-MM-DD)')
     gen_parser.add_argument('--until', help='End date (YYYY-MM-DD)')
-    gen_parser.add_argument('--scale', type=float, default=0.5,
-                            help='Scale factor for images (default: 0.5, use 0.25 for very large diagrams)')
+    gen_parser.add_argument('--width', type=int, default=1920,
+                            help='Canvas width in pixels (default: 1920)')
+    gen_parser.add_argument('--height', type=int, default=1080,
+                            help='Canvas height in pixels (default: 1080)')
     
     # Step 2: Create video
     video_parser = subparsers.add_parser('video', help='Create video from generated images')
@@ -206,7 +263,8 @@ def main():
             output_dir=args.output_dir,
             since=args.since,
             until=args.until,
-            scale=args.scale
+            canvas_width=args.width,
+            canvas_height=args.height
         )
     elif args.command == 'video':
         create_timelapse_video(
