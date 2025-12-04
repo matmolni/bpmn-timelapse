@@ -1,0 +1,2 @@
+# Note: bpmn-to-image is an npm package, install with: npm install -g bpmn-to-image
+# Note: ffmpeg must be installed on your system (brew install ffmpeg on macOS)
