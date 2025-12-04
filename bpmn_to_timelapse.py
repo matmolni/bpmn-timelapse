@@ -287,6 +287,7 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     phase3_start = time.time()
     print(f"\n[Phase 3/3] Converting SVGs to PNG ({canvas_width}x{canvas_height})...")
     png_count = 0
+    total_files = len(frame_mapping)
     for i, (frame_num, bpmn_path, svg_path) in enumerate(frame_mapping, 1):
         if not os.path.exists(svg_path):
             continue
@@ -295,11 +296,12 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
         if svg_to_png(svg_path, output_image, canvas_width, canvas_height):
             png_count += 1
         
-        if i % 50 == 0 or i == len(frame_mapping):
-            elapsed = time.time() - phase3_start
-            print(f"  Converted {i}/{len(frame_mapping)} to PNG... ({elapsed:.1f}s)")
+        # Update progress on same line
+        elapsed = time.time() - phase3_start
+        print(f"\r  Converting: {i}/{total_files} ({elapsed:.1f}s)", end='', flush=True)
     
     phase3_elapsed = time.time() - phase3_start
+    print(f"\r  Converted {png_count}/{total_files} to PNG in {phase3_elapsed:.1f}s")
     
     # Clean up temporary files
     print(f"\nCleaning up temporary files...")
