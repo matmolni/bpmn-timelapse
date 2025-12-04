@@ -247,28 +247,35 @@ def create_timelapse_video(image_dir, output_video, fps=2):
         return False
 
 
-def generate_images(repo_path, filename, output_dir, since=None, until=None, 
-                    canvas_width=1920, canvas_height=1080, batch_size=50):
+def generate_timelapse(repo_path, filename, output_video=None, since=None, until=None, 
+                       canvas_width=1920, canvas_height=1080, batch_size=50, fps=5):
     """
-    Generate images from git history of a BPMN file.
+    Generate a timelapse video from git history of a BPMN file.
     
-    Uses a three-phase approach for performance:
+    Uses a four-phase approach:
     1. Extract all BPMN versions from git history
     2. Batch convert BPMNs to SVGs (minimizes browser launches)
     3. Convert SVGs to PNGs at fixed canvas size
+    4. Create timelapse video from PNGs
     
     Args:
         repo_path: Path to the git repository root
         filename: Name of the BPMN file to track
-        output_dir: Directory to save the generated images
+        output_video: Output video path (default: <filename>_timelapse.mp4)
         since: Optional start date (YYYY-MM-DD)
         until: Optional end date (YYYY-MM-DD)
         canvas_width: Fixed canvas width for output images
         canvas_height: Fixed canvas height for output images
         batch_size: Number of files per BPMN->SVG batch (default 50)
+        fps: Frames per second for output video (default 5)
     """
+    # Generate default output filename from BPMN filename
+    if output_video is None:
+        base_name = os.path.splitext(filename)[0]
+        output_video = f"{base_name}_timelapse.mp4"
+    
     repo_path = os.path.abspath(repo_path)
-    output_dir = os.path.abspath(output_dir)
+    output_dir = os.path.abspath('./timelapse_frames')
     svg_dir = os.path.join(output_dir, 'svg')
     bpmn_dir = os.path.join(output_dir, 'bpmn')
     
@@ -348,13 +355,15 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     shutil.rmtree(bpmn_dir)
     shutil.rmtree(svg_dir)
     
+    # Phase 4: Create timelapse video
+    phase4_start = time.time()
+    print(f"\n[Phase 4/4] Creating timelapse video...")
+    create_timelapse_video(output_dir, output_video, fps)
+    phase4_elapsed = time.time() - phase4_start
+    
     total_elapsed = time.time() - total_start_time
-    print(f"\nDone! {png_count} images saved to: {output_dir}")
-    print(f"Total time: {total_elapsed:.1f}s (Phase 1: {phase1_elapsed:.1f}s, Phase 2: {phase2_elapsed:.1f}s, Phase 3: {phase3_elapsed:.1f}s)")
-    print("Review the images, then run 'video' command to generate the timelapse.")
-
-
-DEFAULT_FRAME_DIR = './timelapse_frames'
+    print(f"\nDone! Video saved to: {output_video}")
+    print(f"Total time: {total_elapsed:.1f}s (Phase 1: {phase1_elapsed:.1f}s, Phase 2: {phase2_elapsed:.1f}s, Phase 3: {phase3_elapsed:.1f}s, Phase 4: {phase4_elapsed:.1f}s)")
 
 
 def main():
@@ -362,44 +371,29 @@ def main():
         description='Generate a timelapse video from git history of a BPMN file'
     )
     
-    subparsers = parser.add_subparsers(dest='command', help='Commands')
-    
-    # Step 1: Generate images
-    gen_parser = subparsers.add_parser('generate', help='Generate images from git history')
-    gen_parser.add_argument('filename', help='Name of the BPMN file to track')
-    gen_parser.add_argument('repo_path', help='Path to the git repository root')
-    gen_parser.add_argument('--since', help='Start date (YYYY-MM-DD)')
-    gen_parser.add_argument('--until', help='End date (YYYY-MM-DD)')
-    gen_parser.add_argument('--width', type=int, default=1920, help='Canvas width (default: 1920)')
-    gen_parser.add_argument('--height', type=int, default=1080, help='Canvas height (default: 1080)')
-    gen_parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
-    
-    # Step 2: Create video
-    video_parser = subparsers.add_parser('video', help='Create video from generated images')
-    video_parser.add_argument('-o', '--output', default='timelapse.mp4', help='Output file (default: timelapse.mp4)')
-    video_parser.add_argument('--fps', type=int, default=5, help='Frames per second (default: 5)')
+    parser.add_argument('filename', help='Name of the BPMN file to track')
+    parser.add_argument('repo_path', help='Path to the git repository root')
+    parser.add_argument('-o', '--output', help='Output video file (default: <filename>_timelapse.mp4)')
+    parser.add_argument('--since', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--until', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--width', type=int, default=1920, help='Canvas width (default: 1920)')
+    parser.add_argument('--height', type=int, default=1080, help='Canvas height (default: 1080)')
+    parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
+    parser.add_argument('--fps', type=int, default=5, help='Frames per second (default: 5)')
     
     args = parser.parse_args()
     
-    if args.command == 'generate':
-        generate_images(
-            repo_path=args.repo_path,
-            filename=args.filename,
-            output_dir=DEFAULT_FRAME_DIR,
-            since=args.since,
-            until=args.until,
-            canvas_width=args.width,
-            canvas_height=args.height,
-            batch_size=args.batch_size
-        )
-    elif args.command == 'video':
-        create_timelapse_video(
-            image_dir=DEFAULT_FRAME_DIR,
-            output_video=args.output,
-            fps=args.fps
-        )
-    else:
-        parser.print_help()
+    generate_timelapse(
+        repo_path=args.repo_path,
+        filename=args.filename,
+        output_video=args.output,
+        since=args.since,
+        until=args.until,
+        canvas_width=args.width,
+        canvas_height=args.height,
+        batch_size=args.batch_size,
+        fps=args.fps
+    )
 
 
 if __name__ == '__main__':
