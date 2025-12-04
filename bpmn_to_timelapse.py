@@ -192,6 +192,11 @@ def create_timelapse_video(image_dir, output_video, fps=2):
     try:
         subprocess.run(cmd, check=True, capture_output=True)
         print(f"Timelapse saved to: {output_video}")
+        
+        # Clean up frame images
+        print(f"Cleaning up frame images...")
+        shutil.rmtree(image_dir)
+        
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error creating video: {e.stderr.decode()}")
@@ -296,13 +301,13 @@ def generate_images(repo_path, filename, output_dir, since=None, until=None,
     
     phase3_elapsed = time.time() - phase3_start
     
-    # Clean up BPMN files (keep SVGs for reference)
-    print(f"\nCleaning up temporary BPMN files...")
+    # Clean up temporary files
+    print(f"\nCleaning up temporary files...")
     shutil.rmtree(bpmn_dir)
+    shutil.rmtree(svg_dir)
     
     total_elapsed = time.time() - total_start_time
     print(f"\nDone! {png_count} images saved to: {output_dir}")
-    print(f"SVGs preserved in: {svg_dir}")
     print(f"Total time: {total_elapsed:.1f}s (Phase 1: {phase1_elapsed:.1f}s, Phase 2: {phase2_elapsed:.1f}s, Phase 3: {phase3_elapsed:.1f}s)")
     print("Review the images, then run 'video' command to generate the timelapse.")
 
