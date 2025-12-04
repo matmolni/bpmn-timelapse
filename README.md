@@ -1,50 +1,89 @@
 # BPMN Timelapse Creator
 
-This script creates a timelapse video from a series of BPMN files, ordered by their git commit dates.
+Generate timelapse videos showing the evolution of a BPMN file through its git history. Each frame represents a commit that modified the file, allowing you to visualize how a process diagram evolved over time.
 
 ## Prerequisites
 
-1. Python 3.6+
-2. Git installed and available in PATH
-3. Node.js (required for bpmn-to-image)
+- Python 3.6+
+- Git
+- Node.js (for bpmn-to-image)
+- ffmpeg (`brew install ffmpeg`)
+- librsvg (`brew install librsvg`)
 
 ## Installation
 
-1. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+# Install bpmn-to-image
+npm install -g bpmn-to-image
 
-2. Install bpmn-to-image globally:
-   ```bash
-   npm install -g bpmn-to-image
-   ```
+# Install system dependencies (macOS)
+brew install ffmpeg librsvg
+```
 
 ## Usage
 
-1. Place your BPMN files in a directory called `bpmn_files/` in the same directory as the script.
-2. Run the script:
-   ```bash
-   python bpmn_to_timelapse.py
-   ```
-3. The script will:
-   - Convert all BPMN files to PNG images
-   - Sort them by their git commit dates
-   - Create a timelapse video called `bpmn_timelapse.mp4`
+The tool uses a two-step workflow: first generate frames, then create the video.
 
-## Output
+### Step 1: Generate Frames
 
-- `output_images/`: Directory containing the generated PNG files
-- `bpmn_timelapse.mp4`: The final timelapse video
+```bash
+python bpmn_to_timelapse.py generate <filename> <repo_path> [options]
+```
 
-## Customization
+**Required arguments:**
+- `filename` - Name of the BPMN file to track (e.g., `my_process.bpmn`)
+- `repo_path` - Path to the git repository containing the file
 
-You can modify these variables in the script:
-- `fps`: Frames per second in the output video (default: 2)
-- `output_video`: Name of the output video file (default: 'bpmn_timelapse.mp4')
+**Optional arguments:**
+- `--since YYYY-MM-DD` - Only include commits after this date
+- `--until YYYY-MM-DD` - Only include commits before this date
+- `--width N` - Canvas width in pixels (default: 1920)
+- `--height N` - Canvas height in pixels (default: 1080)
+- `--batch-size N` - Files per conversion batch (default: 50)
+
+### Step 2: Create Video
+
+```bash
+python bpmn_to_timelapse.py video [options]
+```
+
+**Optional arguments:**
+- `-o, --output FILE` - Output video path (default: `timelapse.mp4`)
+- `--fps N` - Frames per second (default: 2)
+
+## Examples
+
+```bash
+# Generate frames for entire git history at 1080p
+python bpmn_to_timelapse.py generate my_process.bpmn /path/to/repo
+
+# Generate frames for last 6 months at 1440p
+python bpmn_to_timelapse.py generate my_process.bpmn /path/to/repo \
+    --since 2024-06-01 --width 2560 --height 1440
+
+# Create video at 4 fps
+python bpmn_to_timelapse.py video --fps 4
+
+# Create video with custom name
+python bpmn_to_timelapse.py video -o my_process_evolution.mp4
+```
+
+## How It Works
+
+1. **Phase 1**: Extracts all versions of the BPMN file from git history (follows renames)
+2. **Phase 2**: Batch converts BPMN files to SVG using bpmn-to-image (single browser session for performance)
+3. **Phase 3**: Converts SVGs to PNGs at fixed canvas size with centered diagrams
+4. **Video**: Compiles frames into an MP4 video using ffmpeg
+
+## Features
+
+- **Rename tracking**: Follows file renames/moves through git history
+- **Batched conversion**: Processes multiple files per browser launch for better performance
+- **Fixed canvas size**: All frames have consistent dimensions for smooth video playback
+- **Progress logging**: Shows timing for each phase and batch operation
+- **Automatic cleanup**: Temporary files are cleaned up after each step
 
 ## Notes
 
-- The script uses git to get the commit date of each BPMN file for proper ordering
-- Make sure your BPMN files are tracked in git for the timestamp functionality to work
-- If a file isn't in git, it will be placed at the beginning of the timelapse
+- The file must exist in the current HEAD of the repository
+- Only commits on the `main` branch are considered
