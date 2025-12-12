@@ -199,7 +199,7 @@ def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, bac
             # Add semi-transparent background box, white text, top-left position
             vf_filters.append(
                 f"drawtext=text='{escaped_text}':fontsize=24:fontcolor=white:"
-                f"x=20:y=20:box=1:boxcolor=black@0.6:boxborderw=10"
+                f"x=20:y=20:box=1:boxcolor=black@0.4:boxborderw=10"
             )
         
         cmd_ffmpeg = [
@@ -357,7 +357,7 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
             continue
         
         # Format overlay text with date and commit message
-        date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+        date_str = datetime.fromtimestamp(timestamp).strftime('%Y %B %d')
         # Truncate long messages
         short_message = message[:80] + '...' if len(message) > 80 else message
         overlay_text = f"{date_str} | {short_message}"
