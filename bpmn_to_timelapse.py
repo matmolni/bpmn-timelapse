@@ -161,7 +161,8 @@ def batch_convert_bpmn_to_svg(bpmn_svg_pairs, batch_size=50):
     return success_count
 
 
-def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, background='white'):
+def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, background='white',
+               overlay_text=None):
     """
     Convert SVG to PNG at a fixed canvas size, centering the diagram.
     Uses a two-step process: rsvg-convert for SVG rendering, then ffmpeg to pad/center.
@@ -172,6 +173,7 @@ def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, bac
         canvas_width: Fixed canvas width (default 1920 for 1080p)
         canvas_height: Fixed canvas height (default 1080 for 1080p)
         background: Background color (default white)
+        overlay_text: Optional text to overlay on the frame (e.g., commit date and message)
     """
     try:
         # Step 1: Render SVG to PNG, fitting within canvas while keeping aspect ratio
@@ -188,10 +190,22 @@ def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, bac
         subprocess.run(cmd_rsvg, check=True, capture_output=True)
         
         # Step 2: Use ffmpeg to pad the image to exact canvas size, centering it
+        # Optionally add text overlay with commit info
+        vf_filters = [f'pad={canvas_width}:{canvas_height}:(ow-iw)/2:(oh-ih)/2:white']
+        
+        if overlay_text:
+            # Escape special characters for ffmpeg drawtext
+            escaped_text = overlay_text.replace("'", "'\\''").replace(':', '\\:')
+            # Add semi-transparent background box, white text, top-left position
+            vf_filters.append(
+                f"drawtext=text='{escaped_text}':fontsize=24:fontcolor=white:"
+                f"x=20:y=20:box=1:boxcolor=black@0.6:boxborderw=10"
+            )
+        
         cmd_ffmpeg = [
             'ffmpeg', '-y',
             '-i', temp_png,
-            '-vf', f'pad={canvas_width}:{canvas_height}:(ow-iw)/2:(oh-ih)/2:white',
+            '-vf', ','.join(vf_filters),
             output_path
         ]
         subprocess.run(cmd_ffmpeg, check=True, capture_output=True)
@@ -309,7 +323,7 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
     phase1_start = time.time()
     print(f"\n[Phase 1/3] Extracting BPMN files from git history...")
     bpmn_svg_pairs = []
-    frame_mapping = []  # Track (frame_num, bpmn_path, svg_path) for phase 3
+    frame_mapping = []  # Track (frame_num, bpmn_path, svg_path, timestamp, message) for phase 3
     
     for i, (commit_hash, timestamp, message, file_path) in enumerate(commits, 1):
         # Extract BPMN to temp location
@@ -318,7 +332,7 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
         
         checkout_file_version(repo_path, commit_hash, file_path, bpmn_path)
         bpmn_svg_pairs.append((bpmn_path, svg_path))
-        frame_mapping.append((i, bpmn_path, svg_path))
+        frame_mapping.append((i, bpmn_path, svg_path, timestamp, message))
         
         if i % 100 == 0 or i == len(commits):
             print(f"  Extracted {i}/{len(commits)} files...")
@@ -338,12 +352,18 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
     print(f"\n[Phase 3/3] Converting SVGs to PNG ({canvas_width}x{canvas_height})...")
     png_count = 0
     total_files = len(frame_mapping)
-    for i, (frame_num, bpmn_path, svg_path) in enumerate(frame_mapping, 1):
+    for i, (frame_num, bpmn_path, svg_path, timestamp, message) in enumerate(frame_mapping, 1):
         if not os.path.exists(svg_path):
             continue
         
+        # Format overlay text with date and commit message
+        date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+        # Truncate long messages
+        short_message = message[:80] + '...' if len(message) > 80 else message
+        overlay_text = f"{date_str} | {short_message}"
+        
         output_image = os.path.join(output_dir, f'frame_{frame_num:04d}.png')
-        if svg_to_png(svg_path, output_image, canvas_width, canvas_height):
+        if svg_to_png(svg_path, output_image, canvas_width, canvas_height, overlay_text=overlay_text):
             png_count += 1
         
         # Update progress on same line
