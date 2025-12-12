@@ -270,12 +270,15 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
         fps: Frames per second for output video (default 5)
     """
     # Generate default output filename from BPMN filename
+    base_name = os.path.splitext(filename)[0]
     if output_video is None:
-        base_name = os.path.splitext(filename)[0]
         output_video = f"{base_name}_timelapse.mp4"
     
+    # All output goes into ./output directory
     repo_path = os.path.abspath(repo_path)
-    output_dir = os.path.abspath('./timelapse_frames')
+    output_base = os.path.abspath('./output')
+    output_dir = os.path.join(output_base, 'frames')
+    output_video = os.path.join(output_base, output_video)
     svg_dir = os.path.join(output_dir, 'svg')
     bpmn_dir = os.path.join(output_dir, 'bpmn')
     
