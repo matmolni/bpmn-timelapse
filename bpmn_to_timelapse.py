@@ -262,7 +262,8 @@ def create_timelapse_video(image_dir, output_video, fps=2):
 
 
 def generate_timelapse(repo_path, filename, output_video=None, since=None, until=None, 
-                       canvas_width=1920, canvas_height=1080, batch_size=50, fps=5):
+                       canvas_width=1920, canvas_height=1080, batch_size=50, fps=5,
+                       show_overlay=True):
     """
     Generate a timelapse video from git history of a BPMN file.
     
@@ -282,6 +283,7 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
         canvas_height: Fixed canvas height for output images
         batch_size: Number of files per BPMN->SVG batch (default 50)
         fps: Frames per second for output video (default 5)
+        show_overlay: Whether to show commit date/message overlay (default True)
     """
     # Generate default output filename from BPMN filename
     base_name = os.path.splitext(filename)[0]
@@ -357,10 +359,12 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
             continue
         
         # Format overlay text with date and commit message
-        date_str = datetime.fromtimestamp(timestamp).strftime('%Y %B %d')
-        # Truncate long messages
-        short_message = message[:80] + '...' if len(message) > 80 else message
-        overlay_text = f"{date_str} | {short_message}"
+        overlay_text = None
+        if show_overlay:
+            date_str = datetime.fromtimestamp(timestamp).strftime('%Y %B %d')
+            # Truncate long messages
+            short_message = message[:80] + '...' if len(message) > 80 else message
+            overlay_text = f"{date_str} | {short_message}"
         
         output_image = os.path.join(output_dir, f'frame_{frame_num:04d}.png')
         if svg_to_png(svg_path, output_image, canvas_width, canvas_height, overlay_text=overlay_text):
@@ -403,6 +407,7 @@ def main():
     parser.add_argument('--height', type=int, default=1080, help='Canvas height (default: 1080)')
     parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
     parser.add_argument('--fps', type=int, default=5, help='Frames per second (default: 5)')
+    parser.add_argument('--no-overlay', action='store_true', help='Disable commit info overlay')
     
     args = parser.parse_args()
     
@@ -415,7 +420,8 @@ def main():
         canvas_width=args.width,
         canvas_height=args.height,
         batch_size=args.batch_size,
-        fps=args.fps
+        fps=args.fps,
+        show_overlay=not args.no_overlay
     )
 
 
