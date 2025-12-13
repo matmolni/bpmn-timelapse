@@ -224,8 +224,24 @@ def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, bac
         return False
 
 
-def create_timelapse_video(image_dir, output_video, fps=2):
-    """Create a video from a sequence of images using ffmpeg."""
+def get_audio_duration(audio_path):
+    """Get the duration of an audio file in seconds using ffprobe."""
+    cmd = [
+        'ffprobe', '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        audio_path
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return float(result.stdout.strip())
+    except (subprocess.CalledProcessError, ValueError) as e:
+        print(f"Error getting audio duration: {e}")
+        return None
+
+
+def create_timelapse_video(image_dir, output_video, fps=2, audio_path=None):
+    """Create a video from a sequence of images using ffmpeg, optionally with audio."""
     # Get all PNG files sorted by name (they're numbered sequentially)
     images = sorted(Path(image_dir).glob('*.png'))
     
@@ -233,19 +249,31 @@ def create_timelapse_video(image_dir, output_video, fps=2):
         print("No images found for timelapse")
         return False
     
-    print(f"Creating timelapse from {len(images)} images...")
+    print(f"Creating timelapse from {len(images)} images at {fps:.2f} fps...")
     
-    # Use ffmpeg to create video
+    # Build ffmpeg command
     cmd = [
         'ffmpeg', '-y',
         '-framerate', str(fps),
         '-pattern_type', 'glob',
         '-i', os.path.join(image_dir, '*.png'),
+    ]
+    
+    # Add audio input if provided
+    if audio_path:
+        cmd.extend(['-i', audio_path])
+    
+    cmd.extend([
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
         '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',  # Ensure even dimensions
-        output_video
-    ]
+    ])
+    
+    # Add audio codec if audio provided
+    if audio_path:
+        cmd.extend(['-c:a', 'aac', '-shortest'])
+    
+    cmd.append(output_video)
     
     try:
         subprocess.run(cmd, check=True, capture_output=True)
@@ -263,7 +291,7 @@ def create_timelapse_video(image_dir, output_video, fps=2):
 
 def generate_timelapse(repo_path, filename, output_video=None, since=None, until=None, 
                        canvas_width=1920, canvas_height=1080, batch_size=50, fps=5,
-                       show_overlay=True):
+                       show_overlay=True, audio_path=None):
     """
     Generate a timelapse video from git history of a BPMN file.
     
@@ -284,6 +312,7 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
         batch_size: Number of files per BPMN->SVG batch (default 50)
         fps: Frames per second for output video (default 5)
         show_overlay: Whether to show commit date/message overlay (default True)
+        audio_path: Optional path to audio file (syncs video length to audio)
     """
     # Generate default output filename from BPMN filename
     base_name = os.path.splitext(filename)[0]
@@ -384,8 +413,25 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
     
     # Phase 4: Create timelapse video
     phase4_start = time.time()
-    print(f"\n[Phase 4/4] Creating timelapse video...")
-    create_timelapse_video(output_dir, output_video, fps)
+    
+    # If audio provided, calculate FPS to sync video length to audio
+    if audio_path:
+        audio_duration = get_audio_duration(audio_path)
+        if audio_duration:
+            fps = png_count / audio_duration
+            print(f"\n[Phase 4/4] Creating timelapse video with audio...")
+            print(f"  Audio: {audio_path}")
+            print(f"  Audio duration: {audio_duration:.1f}s")
+            print(f"  Calculated FPS: {fps:.2f} ({png_count} frames / {audio_duration:.1f}s)")
+            if fps < 1:
+                print(f"  Warning: Low FPS ({fps:.2f}) - video will play slowly")
+        else:
+            print(f"\n[Phase 4/4] Creating timelapse video (audio duration detection failed)...")
+            audio_path = None  # Fall back to no audio
+    else:
+        print(f"\n[Phase 4/4] Creating timelapse video at {fps} fps...")
+    
+    create_timelapse_video(output_dir, output_video, fps, audio_path)
     phase4_elapsed = time.time() - phase4_start
     
     total_elapsed = time.time() - total_start_time
@@ -406,8 +452,9 @@ def main():
     parser.add_argument('--width', type=int, default=1920, help='Canvas width (default: 1920)')
     parser.add_argument('--height', type=int, default=1080, help='Canvas height (default: 1080)')
     parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
-    parser.add_argument('--fps', type=int, default=5, help='Frames per second (default: 5)')
+    parser.add_argument('--fps', type=int, default=5, help='Frames per second (default: 5, ignored if --audio provided)')
     parser.add_argument('--no-overlay', action='store_true', help='Disable commit info overlay')
+    parser.add_argument('--audio', help='Path to audio file (syncs video length to audio duration)')
     
     args = parser.parse_args()
     
@@ -421,7 +468,8 @@ def main():
         canvas_height=args.height,
         batch_size=args.batch_size,
         fps=args.fps,
-        show_overlay=not args.no_overlay
+        show_overlay=not args.no_overlay,
+        audio_path=args.audio
     )
 
 
