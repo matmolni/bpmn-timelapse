@@ -36,8 +36,10 @@ python bpmn_to_timelapse.py <filename> <repo_path> [options]
 - `--until YYYY-MM-DD` - Only include commits before this date
 - `--width N` - Canvas width in pixels (default: 1920)
 - `--height N` - Canvas height in pixels (default: 1080)
-- `--fps N` - Frames per second (default: 5)
+- `--fps N` - Frames per second (default: 5, ignored if --audio provided)
 - `--batch-size N` - Files per conversion batch (default: 50)
+- `--no-overlay` - Disable commit date/message overlay on frames
+- `--audio FILE` - Add soundtrack and sync video length to audio duration
 
 ## Examples
 
@@ -50,6 +52,12 @@ python bpmn_to_timelapse.py my_process.bpmn /path/to/repo --since 2024-06-01 --w
 
 # Custom output filename and faster playback
 python bpmn_to_timelapse.py my_process.bpmn /path/to/repo -o evolution.mp4 --fps 10
+
+# Add soundtrack (video length syncs to audio duration)
+python bpmn_to_timelapse.py my_process.bpmn /path/to/repo --audio /path/to/music.mp3
+
+# Clean frames without overlay text
+python bpmn_to_timelapse.py my_process.bpmn /path/to/repo --no-overlay
 ```
 
 ## How It Works
