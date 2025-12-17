@@ -196,10 +196,15 @@ def svg_to_png(svg_path, output_path, canvas_width=1920, canvas_height=1080, bac
         if overlay_text:
             # Escape special characters for ffmpeg drawtext
             escaped_text = overlay_text.replace("'", "'\\''").replace(':', '\\:')
+            # Scale text size relative to 1080p baseline
+            scale_factor = canvas_height / 1080
+            fontsize = int(24 * scale_factor)
+            padding = int(20 * scale_factor)
+            boxborder = int(10 * scale_factor)
             # Add semi-transparent background box, white text, top-left position
             vf_filters.append(
-                f"drawtext=text='{escaped_text}':fontsize=24:fontcolor=white:"
-                f"x=20:y=20:box=1:boxcolor=black@0.4:boxborderw=10"
+                f"drawtext=text='{escaped_text}':fontsize={fontsize}:fontcolor=white:"
+                f"x={padding}:y={padding}:box=1:boxcolor=black@0.4:boxborderw={boxborder}"
             )
         
         cmd_ffmpeg = [
