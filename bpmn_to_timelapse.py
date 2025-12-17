@@ -357,7 +357,7 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
     
     # Phase 1: Extract all BPMN versions from git
     phase1_start = time.time()
-    print(f"\n[Phase 1/3] Extracting BPMN files from git history...")
+    print(f"\n[Phase 1/4] Extracting BPMN files from git history...")
     bpmn_svg_pairs = []
     frame_mapping = []  # Track (frame_num, bpmn_path, svg_path, timestamp, message) for phase 3
     
@@ -378,14 +378,14 @@ def generate_timelapse(repo_path, filename, output_video=None, since=None, until
     
     # Phase 2: Batch convert BPMN to SVG
     phase2_start = time.time()
-    print(f"\n[Phase 2/3] Converting BPMN to SVG (batch size: {batch_size})...")
+    print(f"\n[Phase 2/4] Converting BPMN to SVG (batch size: {batch_size})...")
     svg_count = batch_convert_bpmn_to_svg(bpmn_svg_pairs, batch_size=batch_size)
     phase2_elapsed = time.time() - phase2_start
     print(f"  Converted {svg_count}/{len(bpmn_svg_pairs)} files to SVG in {phase2_elapsed:.1f}s")
     
     # Phase 3: Convert SVGs to PNGs at fixed canvas size
     phase3_start = time.time()
-    print(f"\n[Phase 3/3] Converting SVGs to PNG ({canvas_width}x{canvas_height})...")
+    print(f"\n[Phase 3/4] Converting SVGs to PNG ({canvas_width}x{canvas_height})...")
     png_count = 0
     total_files = len(frame_mapping)
     for i, (frame_num, bpmn_path, svg_path, timestamp, message) in enumerate(frame_mapping, 1):
